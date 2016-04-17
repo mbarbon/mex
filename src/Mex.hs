@@ -24,6 +24,7 @@ import Mex.Scan (traverseWith)
 data MediaFormat = MediaFormat String
   deriving (Eq, Show)
 data ExternalSubtitle = ExternalSubtitle { subFile :: String, subFormat :: MediaFormat }
+                      | NoSubtitles String
   deriving (Eq, Show)
 data MediaTrack = MediaTrack { trackId, mediaType :: String, trackFormat :: MediaFormat }
   deriving (Eq, Show)
@@ -108,6 +109,11 @@ formatForExt "ssa" = MediaFormat "SSA"
 isTextSubtitle :: MediaFormat -> Bool
 isTextSubtitle (MediaFormat format) =
   format == "SRT" || format == "ASS" || format == "SSA"
+
+-- XXX configuration
+isGoodInternalSubtitle :: MediaFormat -> Bool
+isGoodInternalSubtitle (MediaFormat "SRT") = True
+isGoodInternalSubtitle _ = False
 
 trackForId :: MediaInfo -> String -> Maybe MediaTrack
 trackForId mediainfo trkid =
@@ -248,7 +254,9 @@ commandList = map makeCommand
     convertSubtitle ExternalSubtitle { subFormat = MediaFormat "SRT", subFile = source } = Noop source
     convertSubtitle es@ExternalSubtitle { subFile = file, subFormat = subFormat } =
       ffmpegConvertSubs es (MediaFormat "SRT")
+    convertSubtitle (NoSubtitles source) = Noop source
     extractInternal :: MediaInfo -> [MediaTrack] -> [(CommandTree, ExternalSubtitle)]
+    extractInternal mediainfo (trk@MediaTrack { mediaType = "Text", trackFormat = format }:ts) | isGoodInternalSubtitle format = (Noop (mediaFile mediainfo), NoSubtitles (mediaFile mediainfo)):extractInternal mediainfo ts
     extractInternal mediainfo (trk@MediaTrack { mediaType = "Text", trackFormat = format }:ts) | not (isTextSubtitle format) = extractInternal mediainfo ts
     extractInternal mediainfo (trk@MediaTrack { mediaType = "Text" }:ts) =
       let (withFfmpeg, ffmpegOut) = ffmpegExtractSubs mediainfo trk
