@@ -1,0 +1,21 @@
+#!/bin/bash
+
+if [ -L "$0" ]; then
+  REALSCRIPT=`readlink "$0"`
+else
+  REALSCRIPT=$0
+fi
+REALDIR=`dirname "$REALSCRIPT"`/src
+MAIN="$REALDIR/Main.hs"
+
+if [ ! -d "$REALDIR" -o ! -f "$MAIN" ]; then
+  echo "Could not find Main.hs in '$REALDIR'"
+  exit 1
+fi
+
+if ! cd "$REALDIR"; then
+  echo "Could not change current directory to '$REALDIR'"
+  exit 1
+fi
+
+exec runhaskell Main.hs "$@"
