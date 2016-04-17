@@ -3,18 +3,21 @@ module Mex (main) where
 import Prelude hiding (lookup, concat)
 import qualified Prelude (lookup)
 import System.Environment (getArgs)
-import System.Process (readProcessWithExitCode)
+import System.Process.ByteString (readProcessWithExitCode)
 import System.FilePath (replaceExtension, takeExtension, replaceDirectory, takeDirectory, (</>))
 import System.Exit (ExitCode(ExitSuccess, ExitFailure))
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.Posix.Files (createSymbolicLink)
-import Text.XML (parseText, elementName, elementAttributes, def, nameLocalName, Element, Name, Node(NodeElement))
+import Text.XML (parseLBS, elementName, elementAttributes, def, nameLocalName, Element, Name, Node(NodeElement))
 import Text.XML.Cursor (fromDocument, checkElement, element, node, content, descendant, Cursor, (&/), ($.//))
 import Data.Maybe (catMaybes)
 import Data.Map.Lazy (member, lookup)
 import Data.Text (pack, unpack, concat)
 import Data.String (fromString)
+import Data.ByteString.Lazy (fromStrict)
 import Data.List (elemIndex, intercalate)
+import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Char8 (putStrLn)
 import Control.Monad (filterM, liftM, foldM, forM_, mapM_)
 import Mex.Scan (traverseWith)
 
@@ -169,8 +172,8 @@ mediaInfo file =
                return MediaTrack { trackId   = textContent trackId,
                                    trackFormat = MediaFormat (textContent format),
                                    mediaType = unpack mediaType }
-   in do (exitCode, xmlOutput, _) <- readProcessWithExitCode "mediainfo" ["--Output=XML", file] ""
-         let Right document = parseText def (fromString xmlOutput)
+   in do (exitCode, xmlOutput, _) <- readProcessWithExitCode "mediainfo" ["--Output=XML", file] ByteString.empty
+         let Right document = parseLBS def (fromStrict xmlOutput)
          let maybeTracks = ($.// (checkElement isTrack)) (fromDocument document)
              allTracks = catMaybes (map getTrack maybeTracks)
           in return MediaInfo { mediaFile = file, tracks = allTracks, subtitles = [] }
@@ -298,30 +301,30 @@ shellCommand (CommandChain And commands) =
 shellCommand (CommandChain Or commands) =
   intercalate " || \\\n    " (map shellCommand commands)
 
-runCommand :: CommandTree -> IO (Bool, String)
-runCommand (None _) = return (True, "")
-runCommand (Noop _) = return (True, "")
+runCommand :: CommandTree -> IO (Bool, ByteString.ByteString)
+runCommand (None _) = return (True, ByteString.empty)
+runCommand (Noop _) = return (True, ByteString.empty)
 runCommand (Command command args) =
-  do (exitCode, output, error) <- readProcessWithExitCode command args ""
+  do (exitCode, output, error) <- readProcessWithExitCode command args ByteString.empty
      case exitCode of
        ExitSuccess   -> return (True, output)
-       ExitFailure _ -> return (False, if null error then output else error)
+       ExitFailure _ -> return (False, if ByteString.null error then output else error)
 runCommand (CommandChain And commands) =
-  foldM mergeResult (True, "") commands
+  foldM mergeResult (True, ByteString.empty) commands
   where
     mergeResult fail@(False, _) _ = return fail
     mergeResult _ command = runCommand command
 runCommand (CommandChain Or commands) =
-  foldM mergeResult (False, "") commands
+  foldM mergeResult (False, ByteString.empty) commands
   where
     mergeResult success@(True, _) _ = return success
     mergeResult _ command = runCommand command
 
-runVerbose :: CommandTree -> IO (Bool, String)
+runVerbose :: CommandTree -> IO (Bool, ByteString.ByteString)
 runVerbose command =
   do putStrLn (shellCommand command)
      (success, output) <- runCommand command
      if success
        then return ()
-       else putStrLn ("Command failed:\n\n" ++ output)
+       else putStr "Command failed:\n\n" >> Data.ByteString.Char8.putStrLn output
      return (success, output)
