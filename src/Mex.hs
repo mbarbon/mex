@@ -29,8 +29,8 @@ data MediaInfo = MediaInfo { mediaFile :: String, tracks :: [MediaTrack], subtit
 data CommandOperation = And | Or deriving (Eq, Read, Show)
 data CommandTree = CommandChain CommandOperation [CommandTree]
                  | Command String [String]
-                 | Noop
-                 | None
+                 | Noop FilePath
+                 | None FilePath
   deriving (Eq, Read, Show)
 
 commands :: [(String, [String] -> IO ())]
@@ -196,7 +196,7 @@ ffmpegExtractSubs mediainfo track =
    in (command, result)
 
 ffmpegConvertSubs :: ExternalSubtitle -> MediaFormat -> CommandTree
-ffmpegConvertSubs es@ExternalSubtitle { subFormat = subFormat } format | subFormat == format = Noop
+ffmpegConvertSubs es@ExternalSubtitle { subFormat = subFormat, subFile = source } format | subFormat == format = Noop source
 ffmpegConvertSubs source format =
   let srcFile = (subFile source)
       outFile = replaceExtension srcFile (extForFormat format)
@@ -214,7 +214,7 @@ ffmpegHardsub mediainfo track =
 removeHtmlTags :: ExternalSubtitle -> CommandTree
 removeHtmlTags es | isTextSubtitle (subFormat es) =
   Command "sed" ["-i.orig", "s/<[^>]\\+>//g", (subFile es)]
-removeHtmlTags _ = Noop
+removeHtmlTags es = Noop (subFile es)
 
 renameFile :: String -> String -> CommandTree
 renameFile from to = Command "mv" [from, to]
@@ -232,17 +232,17 @@ commandList = map makeCommand
             -- picking the last is a broken heuristic
             let internalAlternatives = extractInternal mediainfo (tracks mediainfo)
              in if null internalAlternatives
-                  then None
+                  then None (mediaFile mediainfo)
                   else let (extractInternalCmd, extractedSub) = last internalAlternatives
                         in concatCommand And extractInternalCmd (convertSubtitle extractedSub)
           hardsubInternalCmd = hardsubInternal mediainfo (tracks mediainfo)
        in case (convertExternalCmd, convertInternalCmd, hardsubInternalCmd) of
-            (None, None, None)    -> None
-            (None, None, hardsub) -> hardsub
-            (None, extract, _)    -> extract
-            (convert, _, _)       -> convert
+            (None _, None _, none@(None _)) -> none
+            (None _, None _, hardsub)       -> hardsub
+            (None _, extract, _)            -> extract
+            (convert, _, _)                 -> convert
     convertSubtitle :: ExternalSubtitle -> CommandTree
-    convertSubtitle ExternalSubtitle { subFormat = MediaFormat "SRT" } = Noop
+    convertSubtitle ExternalSubtitle { subFormat = MediaFormat "SRT", subFile = source } = Noop source
     convertSubtitle es@ExternalSubtitle { subFile = file, subFormat = subFormat } =
       ffmpegConvertSubs es (MediaFormat "SRT")
     extractInternal :: MediaInfo -> [MediaTrack] -> [(CommandTree, ExternalSubtitle)]
@@ -262,35 +262,35 @@ commandList = map makeCommand
       -- picking the last is a broken heuristic
       let subtitles = filter (("Text" ==) . mediaType) tracks
        in if null subtitles
-            then None
+            then None (mediaFile mediainfo)
             else ffmpegHardsub mediainfo (last subtitles)
 
 concatCommands :: [CommandTree] -> CommandTree
-concatCommands = foldr (concatCommand And) Noop
+concatCommands = foldr (concatCommand And) (Noop "This should never be seen")
 
 bestCommand :: [CommandTree] -> CommandTree
-bestCommand = foldr pickBest None
+bestCommand = foldr pickBest (None "This should never be seen")
   where
-    pickBest None cmd2 = cmd2
-    pickBest cmd1 None = cmd1
-    pickBest Noop cmd2 = Noop
-    pickBest cmd1 Noop = Noop
+    pickBest (None _) cmd2 = cmd2
+    pickBest cmd1 (None _) = cmd1
+    pickBest noop@(Noop _) cmd2 = noop
+    pickBest cmd1 noop@(Noop _) = noop
     -- arbitrary
     pickBest cmd1 cmd2 = cmd1
 
 concatCommand :: CommandOperation -> CommandTree -> CommandTree -> CommandTree
-concatCommand op None cmd2 = None
-concatCommand op cmd1 None = None
-concatCommand op Noop cmd2 = cmd2
-concatCommand op cmd1 Noop = cmd1
+concatCommand op none@(None _) cmd2 = none
+concatCommand op cmd1 none@(None _) = none
+concatCommand op (Noop _) cmd2 = cmd2
+concatCommand op cmd1 (Noop _) = cmd1
 concatCommand op cmd1 cmd2 = CommandChain op (cmd1 : cmd2 : [])
 
 shellScript :: [CommandTree] -> String
 shellScript commands = intercalate "\n" (map shellCommand commands)
 
 shellCommand :: CommandTree -> String
-shellCommand None = "# can't do anything"
-shellCommand Noop = "# nothing to do"
+shellCommand (None name) = "# can't do anything for " ++ name
+shellCommand (Noop name) = "# nothing to do for " ++ name
 shellCommand (Command command args) =
   command ++ " '" ++ (intercalate "' '" args) ++ "'"
 shellCommand (CommandChain And commands) =
@@ -299,8 +299,8 @@ shellCommand (CommandChain Or commands) =
   intercalate " || \\\n    " (map shellCommand commands)
 
 runCommand :: CommandTree -> IO (Bool, String)
-runCommand None = return (False, "'None' commands can't be executed")
-runCommand Noop = return (True, "")
+runCommand (None _) = return (True, "")
+runCommand (Noop _) = return (True, "")
 runCommand (Command command args) =
   do (exitCode, output, error) <- readProcessWithExitCode command args ""
      case exitCode of
