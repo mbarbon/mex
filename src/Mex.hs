@@ -1,11 +1,13 @@
 module Mex (main) where
 
 import Prelude hiding (lookup, concat)
+import qualified Prelude (lookup)
 import System.Environment (getArgs)
 import System.Process (readProcessWithExitCode)
-import System.FilePath (replaceExtension, takeExtension, replaceDirectory, combine)
+import System.FilePath (replaceExtension, takeExtension, replaceDirectory, takeDirectory, (</>))
 import System.Exit (ExitCode(ExitSuccess, ExitFailure))
-import System.Directory (doesFileExist, getDirectoryContents)
+import System.Directory (doesFileExist, createDirectoryIfMissing)
+import System.Posix.Files (createSymbolicLink)
 import Text.XML (parseText, elementName, elementAttributes, def, nameLocalName, Element, Name, Node(NodeElement))
 import Text.XML.Cursor (fromDocument, checkElement, element, node, content, descendant, Cursor, (&/), ($.//))
 import Data.Maybe (catMaybes)
@@ -13,8 +15,8 @@ import Data.Map.Lazy (member, lookup)
 import Data.Text (pack, unpack, concat)
 import Data.String (fromString)
 import Data.List (elemIndex, intercalate)
-import Debug.Trace
-import Control.Monad (filterM, liftM, foldM)
+import Control.Monad (filterM, liftM, foldM, forM_, mapM_)
+import Mex.Scan (traverseWith)
 
 data MediaFormat = MediaFormat String
   deriving (Eq, Show)
@@ -31,16 +33,61 @@ data CommandTree = CommandChain CommandOperation [CommandTree]
                  | None
   deriving (Eq, Read, Show)
 
+commands :: [(String, [String] -> IO ())]
+commands = [
+    ("process", processDirectory),
+    ("scan",    scanTree),
+    ("help",    showHelp)
+  ]
+
 main =
-  do directories <- getArgs
-     mapM processDir directories
+  do args <- getArgs
+     case args of
+       (command : commandArgs) -> runCommand command commandArgs
+       _                       -> showHelp []
   where
-    processDir :: String -> IO ()
-    processDir directory =
-      do workitems <- workList directory
-         let commands = commandList workitems
-         mapM runVerbose commands
-         return ()
+    runCommand command args =
+      case Prelude.lookup command commands of
+        Just action -> action args
+        Nothing     -> showHelp []
+
+processDirectory :: [String] -> IO ()
+processDirectory directories =
+  forM_ directories $ \path ->
+    traverseWith (processMediaFiles path) path
+
+scanTree :: [String] -> IO ()
+scanTree (source : target : []) =
+  do traverseWith (symlinkMediaAndSubtitleFiles source target) source
+     traverseWith (processMediaFiles target) target
+scanTree _ = showHelp []
+
+showHelp :: [String] -> IO ()
+showHelp _ =
+  let help = "\
+\Usage: mex <command> [args]\n\
+\\n\
+\Commands:\n\
+\    help\n\
+\    process <directory> [<directory> ...]\n\
+\    scan    <source directory> <target directory>\n"
+   in putStr  help
+
+symlinkMediaAndSubtitleFiles :: FilePath -> FilePath -> [FilePath] -> IO ()
+symlinkMediaAndSubtitleFiles source target files =
+  forM_ (filter isMediaOrSubtitleFile files) $ \file -> do
+    let targetPath = target </> file
+    fileExists <- doesFileExist targetPath
+    if not fileExists
+      then do
+        createDirectoryIfMissing True (takeDirectory targetPath)
+        createSymbolicLink (source </> file) targetPath
+      else return ()
+
+processMediaFiles :: FilePath -> [FilePath] -> IO ()
+processMediaFiles source files =
+  do workItems <- workList $ map (source </>) (filter isMediaFile files)
+     mapM_ runVerbose (commandList workItems)
 
 mediaFiles = ["mkv", "avi", "mp4"]
 subtitleFiles  = ["srt", "ass", "ssa"]
@@ -69,25 +116,26 @@ trackIndex :: MediaInfo -> String -> String -> Maybe Int
 trackIndex mediainfo mediatype trkid =
   elemIndex trkid (map trackId (filter (\t -> mediatype == mediaType t) (tracks mediainfo)))
 
-workList :: FilePath -> IO [MediaInfo]
-workList directory =
-      do files <- listMediaFiles directory
-         mapM makeWorkEntry files
+workList :: [FilePath] -> IO [MediaInfo]
+workList files =
+  mapM makeWorkEntry (filter isMediaFile files)
   where
     makeWorkEntry :: FilePath -> IO MediaInfo
     makeWorkEntry file =
       mediaInfo file >>= addExternalSubs
 
-listMediaFiles :: FilePath -> IO [FilePath]
-listMediaFiles dir =
-  let isMediaFile :: FilePath -> Bool
-      isMediaFile f =
-        case takeExtension f of
-          '.' : ext -> ext `elem` mediaFiles
-          ""        -> False
-    in do files <- getDirectoryContents dir
-          return [file | file <- map (combine dir) files, isMediaFile file]
-  
+isMediaOrSubtitleFile :: FilePath -> Bool
+isMediaOrSubtitleFile f =
+  case takeExtension f of
+    '.' : ext -> ext `elem` (mediaFiles ++ subtitleFiles)
+    ""        -> False
+
+isMediaFile :: FilePath -> Bool
+isMediaFile f =
+  case takeExtension f of
+    '.' : ext -> ext `elem` mediaFiles
+    ""        -> False
+
 addExternalSubs :: MediaInfo -> IO MediaInfo
 addExternalSubs mi@MediaInfo { mediaFile = file } =
   do externalSubs <- findExternalSubs file
