@@ -108,11 +108,12 @@ formatForExt "ssa" = MediaFormat "SSA"
 
 isTextSubtitle :: MediaFormat -> Bool
 isTextSubtitle (MediaFormat format) =
-  format == "SRT" || format == "ASS" || format == "SSA"
+  format == "SRT" || format == "ASS" || format == "SSA" || format == "UTF-8"
 
 -- XXX configuration
 isGoodInternalSubtitle :: MediaFormat -> Bool
 isGoodInternalSubtitle (MediaFormat "SRT") = True
+isGoodInternalSubtitle (MediaFormat "UTF-8") = True
 isGoodInternalSubtitle _ = False
 
 trackForId :: MediaInfo -> String -> Maybe MediaTrack
