@@ -277,9 +277,6 @@ commandList = map makeCommand
             then None (mediaFile mediainfo)
             else ffmpegHardsub mediainfo (last subtitles)
 
-concatCommands :: [CommandTree] -> CommandTree
-concatCommands = foldr (concatCommand And) (Noop "This should never be seen")
-
 bestCommand :: [CommandTree] -> CommandTree
 bestCommand = foldr pickBest (None "This should never be seen")
   where
@@ -296,9 +293,6 @@ concatCommand op cmd1 none@(None _) = none
 concatCommand op (Noop _) cmd2 = cmd2
 concatCommand op cmd1 (Noop _) = cmd1
 concatCommand op cmd1 cmd2 = CommandChain op (cmd1 : cmd2 : [])
-
-shellScript :: [CommandTree] -> String
-shellScript commands = intercalate "\n" (map shellCommand commands)
 
 shellCommand :: CommandTree -> String
 shellCommand (None name) = "# can't do anything for " ++ name
