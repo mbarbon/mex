@@ -1,4 +1,6 @@
-module Mex.Scan (traverseWith) where
+module Mex.Scan (
+  traverseWith,
+) where
 
 import Control.Monad (liftM, foldM, forM_)
 import Data.List (partition)
