@@ -2,35 +2,55 @@ module Mex.Commands (
   mkvextractSubs,
   ffmpegExtractSubs,
   ffmpegConvertSubs,
+  ffmpegConvertAllSubs,
   ffmpegHardsub,
   removeHtmlTags,
   renameFile,
 ) where
 
+import Control.Monad (foldM_)
+import Data.List (intercalate)
 import System.FilePath (replaceExtension, takeExtension)
 
-import Mex.CommandTree (CommandTree, shellCommand, noopCommand, andCommand)
+import Mex.CommandTree
 import Mex.MediaInfo
 
-mkvextractSubs :: MediaInfo -> MediaTrack -> (CommandTree, ExternalSubtitle)
-mkvextractSubs mediainfo track =
-  let index = (read (trackId track)) - 1
-      path = (mediaFile mediainfo)
-      format = trackFormat track
-      fileExt = extForFormat $ format
-      outFile = replaceExtension path fileExt
-      command = shellCommand "mkvextract" ["tracks", path, (show index) ++ ":" ++ outFile]
-      result = ExternalSubtitle { subFormat = format, subFile = outFile }
-   in (command, result)
+mkvextractSubs :: MediaInfo -> [MediaTrack] -> (CommandTree, [ExternalSubtitle])
+mkvextractSubs mediainfo tracks =
+  let parts = map mapping tracks
+      command = shellCommand "mkvextract" (concat (prefix:(map fst parts)))
+   in (command, map snd parts)
+  where
+    path = mediaFile mediainfo
+    prefix = ["tracks", path]
 
-ffmpegExtractSubs :: MediaInfo -> MediaTrack -> (CommandTree, ExternalSubtitle)
-ffmpegExtractSubs mediainfo track =
-  let Just index = trackIndex mediainfo "Text" (trackId track)
-      path = (mediaFile mediainfo)
-      outFile = replaceExtension path "srt"
-      command = shellCommand "ffmpeg" ["-y", "-i", path, "-map", "0:s:" ++ (show index), "-an", "-vn", "-c:s", "srt", outFile]
-      result = ExternalSubtitle { subFormat = MediaFormat "SRT", subFile = outFile }
-   in (command, result)
+    makeSub file format = ExternalSubtitle { subFormat = format, subFile = file }
+
+    mapping :: MediaTrack -> ([String], ExternalSubtitle)
+    mapping MediaTrack { trackId = trkId, trackFormat = format } =
+      let index = (read trkId) - 1
+          ext = trkId ++ "." ++ extForFormat format
+          outFile = replaceExtension path ext
+       in ([(show index) ++ ":" ++ outFile], makeSub outFile format)
+
+ffmpegExtractSubs :: MediaInfo -> [MediaTrack] -> (CommandTree, [ExternalSubtitle])
+ffmpegExtractSubs mediainfo tracks =
+  let parts = mapping 0 tracks
+      command = shellCommand "ffmpeg" (concat (prefix : (map fst parts)))
+   in (command, map snd parts)
+  where
+    path = mediaFile mediainfo
+    prefix = ["-y", "-i", path, "-c:s", "srt", "-an", "-vn"]
+
+    makeSrt file = ExternalSubtitle { subFormat = MediaFormat "SRT", subFile = file }
+
+    mapping :: Int -> [MediaTrack] -> [([String], ExternalSubtitle)]
+    mapping _ []     = []
+    mapping index (t:ts) =
+      let idx = show index
+          outFile = replaceExtension path (idx ++ ".srt")
+          args = ["-map", "0:s:" ++ idx, outFile]
+       in (args, makeSrt outFile):mapping (index + 1) ts
 
 ffmpegConvertSubs :: ExternalSubtitle -> MediaFormat -> CommandTree
 ffmpegConvertSubs es@ExternalSubtitle { subFormat = subFormat, subFile = source } format | subFormat == format = noopCommand source
@@ -38,6 +58,10 @@ ffmpegConvertSubs source format =
   let srcFile = (subFile source)
       outFile = replaceExtension srcFile (extForFormat format)
    in shellCommand "ffmpeg" ["-y", "-i", srcFile, outFile]
+
+ffmpegConvertAllSubs :: [ExternalSubtitle] -> MediaFormat -> CommandTree
+ffmpegConvertAllSubs subs format =
+  foldl andCommand (noopCommand "This should never be seen") $ map (`ffmpegConvertSubs` format) subs
 
 ffmpegHardsub :: MediaInfo -> MediaTrack -> CommandTree
 ffmpegHardsub mediainfo track =
@@ -48,10 +72,11 @@ ffmpegHardsub mediainfo track =
       command = shellCommand "ffmpeg" ["-y", "-i", path, "-filter_complex", filterSpec, "-map", "[v]", "-map", "0:a", "-c:a", "copy", tempFile]
    in command `andCommand` (renameFile tempFile path)
 
-removeHtmlTags :: ExternalSubtitle -> CommandTree
-removeHtmlTags es | isTextSubtitle (subFormat es) =
-  shellCommand "sed" ["-i.orig", "s/<[^>]\\+>//g", (subFile es)]
-removeHtmlTags es = noopCommand (subFile es)
+removeHtmlTags :: [ExternalSubtitle] -> CommandTree
+removeHtmlTags subs =
+  case (filter (isTextSubtitle . subFormat) subs) of
+      []   -> noopCommand (intercalate ", " (map subFile subs))
+      subs -> shellCommand "sed" (["-i.orig", "s/<[^>]\\+>//g"] ++ (map subFile subs))
 
 renameFile :: String -> String -> CommandTree
 renameFile from to = shellCommand "mv" [from, to]

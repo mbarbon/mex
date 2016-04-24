@@ -7,8 +7,9 @@ import System.FilePath (replaceDirectory, takeDirectory, (</>))
 import System.Posix.Files (createSymbolicLink)
 
 import Mex.Commands
-import Mex.CommandTree (CommandTree, andCommand, orCommand, noopCommand, noCommand, runVerbose, viableCommand)
+import Mex.CommandTree
 import Mex.MediaInfo
+import Mex.Subtitles
 import Mex.Scan (traverseWith)
 
 commands :: [(String, [String] -> IO ())]
@@ -73,6 +74,10 @@ isGoodInternalSubtitle (MediaFormat "SRT") = True
 isGoodInternalSubtitle (MediaFormat "UTF-8") = True
 isGoodInternalSubtitle _ = False
 
+isGoodExternalSubtitle :: MediaFormat -> Bool
+isGoodExternalSubtitle (MediaFormat "SRT") = True
+isGoodExternalSubtitle _ = False
+
 workList :: [FilePath] -> IO [MediaInfo]
 workList files =
   mapM makeWorkEntry (filter isMediaFile files)
@@ -86,41 +91,18 @@ commandList = map makeCommand
   where
     makeCommand :: MediaInfo -> CommandTree
     makeCommand mediainfo =
-      let extractSubtitlesCmd = extractSubtitles mediainfo
-       in extractSubtitlesCmd
-    extractSubtitles mediainfo@MediaInfo {subtitles = subtitles } =
-      let convertExternalCmd = viableCommand (map convertSubtitle subtitles)
-          convertInternalCmd =
-            -- picking the last is a broken heuristic
-            let internalAlternatives = extractInternal mediainfo (tracks mediainfo)
-             in if null internalAlternatives
-                  then noCommand (mediaFile mediainfo)
-                  else let (extractInternalCmd, extractedSub) = last internalAlternatives
-                        in extractInternalCmd `andCommand` (convertSubtitle extractedSub)
-          hardsubInternalCmd = hardsubInternal mediainfo (tracks mediainfo)
-       in viableCommand [convertExternalCmd, convertInternalCmd, hardsubInternalCmd]
-    convertSubtitle :: ExternalSubtitle -> CommandTree
-    convertSubtitle ExternalSubtitle { subFormat = MediaFormat "SRT", subFile = source } = noopCommand source
-    convertSubtitle es@ExternalSubtitle { subFile = file, subFormat = subFormat } =
-      ffmpegConvertSubs es (MediaFormat "SRT")
-    convertSubtitle (NoSubtitles source) = noopCommand source
-    extractInternal :: MediaInfo -> [MediaTrack] -> [(CommandTree, ExternalSubtitle)]
-    extractInternal mediainfo (trk@MediaTrack { mediaType = "Text", trackFormat = format }:ts) | isGoodInternalSubtitle format = (noopCommand (mediaFile mediainfo), NoSubtitles (mediaFile mediainfo)):extractInternal mediainfo ts
-    extractInternal mediainfo (trk@MediaTrack { mediaType = "Text", trackFormat = format }:ts) | not (isTextSubtitle format) = extractInternal mediainfo ts
-    extractInternal mediainfo (trk@MediaTrack { mediaType = "Text" }:ts) =
-      let (withFfmpeg, ffmpegOut) = ffmpegExtractSubs mediainfo trk
-          (withMkvExtract, mkvextractInt) = mkvextractSubs mediainfo trk
-          withMkvConvert = ffmpegConvertSubs mkvextractInt (MediaFormat "SRT")
-          mkvPipeline =  withMkvExtract `andCommand` withMkvConvert
-          tryEither = withFfmpeg `orCommand` mkvPipeline
-          deHtml = tryEither `andCommand` (removeHtmlTags ffmpegOut)
-       in (deHtml, ffmpegOut) : extractInternal mediainfo ts
-    extractInternal mediainfo (t:ts) = extractInternal mediainfo ts
-    extractInternal _ [] = []
-    hardsubInternal :: MediaInfo -> [MediaTrack] -> CommandTree
-    hardsubInternal mediainfo tracks =
-      -- picking the last is a broken heuristic
-      let subtitles = filter (("Text" ==) . mediaType) tracks
-       in if null subtitles
-            then noCommand (mediaFile mediainfo)
-            else ffmpegHardsub mediainfo (last subtitles)
+      let goodExternal = filter (isGoodExternalSubtitle . subFormat) (subtitles mediainfo)
+          goodInternal = filter (isGoodInternalSubtitle . trackFormat) (tracks mediainfo)
+       in if (null goodExternal) && (null goodInternal)
+            then extractAndConvertSubtitles mediainfo
+            else noopCommand (mediaFile mediainfo)
+
+extractAndConvertSubtitles mediainfo@MediaInfo {subtitles = subtitles } =
+  let convertExternalCmd = viableCommand (map convertSubtitle subtitles)
+      convertInternalCmd =
+        let textSubs = (filter (isTextSubtitle . trackFormat) (tracks mediainfo))
+         in if null textSubs
+              then noCommand (mediaFile mediainfo)
+              else extractAndConvertViableInternalSub mediainfo textSubs
+      hardsubInternalCmd = hardsubInternalSub mediainfo (tracks mediainfo)
+   in viableCommand [convertExternalCmd, convertInternalCmd, hardsubInternalCmd]

@@ -1,31 +1,38 @@
 module Mex.CommandTree (
   CommandTree,
+  FailureDescription,
   shellCommand,
   noopCommand,
   noCommand,
+  internalCommand,
   andCommand,
   orCommand,
   runVerbose,
+  displayCommand,
   viableCommand,
+  commandSuccess,
+  describeFailure,
 ) where
 
 import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Char8 (putStrLn)
+import qualified Data.ByteString.Char8 as Char8
 
 import Control.Monad (foldM)
 import Data.List (intercalate)
 import System.Exit (ExitCode(ExitSuccess, ExitFailure))
 import System.Process.ByteString (readProcessWithExitCode)
 
+type FailureDescription = ByteString.ByteString
+
 data CommandOperation = And | Or deriving (Eq, Read, Show)
 data CommandTree = CommandChain CommandOperation [CommandTree]
-                 | Command String [String]
+                 | ShellCommand String [String]
+                 | Internal String (IO (Bool, ByteString.ByteString))
                  | Noop FilePath
                  | None FilePath
-  deriving (Eq, Read, Show)
 
 shellCommand :: String -> [String] -> CommandTree
-shellCommand command args = Command command args
+shellCommand command args = ShellCommand command args
 
 concatCommand :: CommandOperation -> CommandTree -> CommandTree -> CommandTree
 concatCommand op none@(None _) cmd2 = none
@@ -38,12 +45,14 @@ andCommand = concatCommand And
 orCommand = concatCommand Or
 noopCommand = Noop
 noCommand = None
+internalCommand = Internal
 
 displayCommand :: CommandTree -> String
 displayCommand (None name) = "# can't do anything for " ++ name
 displayCommand (Noop name) = "# nothing to do for " ++ name
-displayCommand (Command command args) =
+displayCommand (ShellCommand command args) =
   command ++ " '" ++ (intercalate "' '" args) ++ "'"
+displayCommand (Internal description _) = description
 displayCommand (CommandChain And commands) =
   intercalate " && \\\n    " (map displayCommand commands)
 displayCommand (CommandChain Or commands) =
@@ -52,11 +61,12 @@ displayCommand (CommandChain Or commands) =
 runCommand :: CommandTree -> IO (Bool, ByteString.ByteString)
 runCommand (None _) = return (True, ByteString.empty)
 runCommand (Noop _) = return (True, ByteString.empty)
-runCommand (Command command args) =
+runCommand (ShellCommand command args) =
   do (exitCode, output, error) <- readProcessWithExitCode command args ByteString.empty
      case exitCode of
        ExitSuccess   -> return (True, output)
        ExitFailure _ -> return (False, if ByteString.null error then output else error)
+runCommand (Internal _ action) = action
 runCommand (CommandChain And commands) =
   foldM mergeResult (True, ByteString.empty) commands
   where
@@ -74,7 +84,7 @@ runVerbose command =
      (success, output) <- runCommand command
      if success
        then return ()
-       else putStr "Command failed:\n\n" >> Data.ByteString.Char8.putStrLn output
+       else putStr "Command failed:\n\n" >> Char8.putStrLn output
      return (success, output)
 
 viableCommand :: [CommandTree] -> CommandTree
@@ -86,3 +96,9 @@ viableCommand = foldl pickBest (None "This should never be seen")
     pickBest cmd1 noop@(Noop _) = noop
     -- arbitrary
     pickBest cmd1 cmd2 = cmd1
+
+describeFailure :: String -> FailureDescription
+describeFailure = Char8.pack
+
+commandSuccess :: IO (Bool, FailureDescription)
+commandSuccess = return (True, describeFailure "")
