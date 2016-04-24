@@ -10,6 +10,7 @@ import Mex.Commands
 import Mex.CommandTree
 import Mex.MediaInfo
 import Mex.Subtitles
+import Mex.Transcode
 import Mex.Scan (traverseWith)
 
 commands :: [(String, [String] -> IO ())]
@@ -78,6 +79,10 @@ isGoodExternalSubtitle :: MediaFormat -> Bool
 isGoodExternalSubtitle (MediaFormat "SRT") = True
 isGoodExternalSubtitle _ = False
 
+isGoodAudioFormat :: MediaFormat -> Bool
+isGoodAudioFormat (MediaFormat "FLAC") = False
+isGoodAudioFormat _ = True
+
 workList :: [FilePath] -> IO [MediaInfo]
 workList files =
   mapM makeWorkEntry (filter isMediaFile files)
@@ -93,16 +98,47 @@ commandList = map makeCommand
     makeCommand mediainfo =
       let goodExternal = filter (isGoodExternalSubtitle . subFormat) (subtitles mediainfo)
           goodInternal = filter (isGoodInternalSubtitle . trackFormat) (tracks mediainfo)
+          transcode = maybeTranscodeAudio mediainfo (maybeTranscodeVideo mediainfo (noopTranscode mediainfo))
        in if (null goodExternal) && (null goodInternal)
-            then extractAndConvertSubtitles mediainfo
-            else noopCommand (mediaFile mediainfo)
+            then extractAndConvertSubtitles mediainfo transcode
+            else transcodeCommand transcode
 
-extractAndConvertSubtitles mediainfo@MediaInfo {subtitles = subtitles } =
+extractAndConvertSubtitles mediainfo@MediaInfo {subtitles = subtitles } transcode =
   let convertExternalCmd = viableCommand (map convertSubtitle subtitles)
       convertInternalCmd =
         let textSubs = (filter (isTextSubtitle . trackFormat) (tracks mediainfo))
          in if null textSubs
               then noCommand (mediaFile mediainfo)
               else extractAndConvertViableInternalSub mediainfo textSubs
-      hardsubInternalCmd = hardsubInternalSub mediainfo (tracks mediainfo)
-   in viableCommand [convertExternalCmd, convertInternalCmd, hardsubInternalCmd]
+      hardsubInternalCmd = transcodeCommand (hardsubInternalSub transcode (tracks mediainfo))
+      chosen = viableCommand [convertExternalCmd, convertInternalCmd, hardsubInternalCmd]
+      extractAndTranscode = chosen `andCommand` (transcodeCommand transcode)
+   in case (isViableCommand convertExternalCmd, isViableCommand convertInternalCmd) of
+       (False, False) -> chosen
+       _              -> extractAndTranscode
+
+maybeTranscodeVideo :: MediaInfo -> Transcode -> Transcode
+maybeTranscodeVideo mediainfo transcode =
+  if needsTranscode
+    then transcodeVideo transcode basicX264
+    else transcode
+  where
+    needsTranscode = any tooManyRefFrames (tracks mediainfo)
+
+    -- XXX configuration
+    tooManyRefFrames (MediaTrack { mediaType = "Video", referenceFrames = Just count }) =
+      count > 8
+    tooManyRefFrames _ = False
+
+maybeTranscodeAudio :: MediaInfo -> Transcode -> Transcode
+maybeTranscodeAudio mediainfo transcode =
+  if needsTranscode
+    then transcodeAudio transcode basicAAC
+    else transcode
+  where
+    needsTranscode = not (any (isGoodAudioFormat . trackFormat) (audioTracks mediainfo))
+
+-- XXX configuration
+basicX264 = ["libx264", "-preset", "slow", "-level", "4.1", "-crf", "23"]
+
+basicAAC = ["aac", "-b:a", "192k"]

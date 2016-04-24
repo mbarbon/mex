@@ -11,6 +11,7 @@ module Mex.MediaInfo (
   isMediaFile,
   isMediaOrSubtitleFile,
   trackIndex,
+  audioTracks,
 ) where
 
 import Prelude hiding (lookup, concat)
@@ -68,6 +69,9 @@ isMediaFile f =
   case takeExtension f of
     '.' : ext -> ext `elem` mediaFiles
     ""        -> False
+
+audioTracks :: MediaInfo -> [MediaTrack]
+audioTracks = (filter ((== "Audio") . mediaType)) . tracks
 
 trackIndex :: MediaInfo -> String -> String -> Maybe Int
 trackIndex mediainfo mediatype trkid =

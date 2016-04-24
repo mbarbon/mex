@@ -10,6 +10,7 @@ module Mex.CommandTree (
   runVerbose,
   displayCommand,
   viableCommand,
+  isViableCommand,
   commandSuccess,
   describeFailure,
 ) where
@@ -96,6 +97,9 @@ viableCommand = foldl pickBest (None "This should never be seen")
     pickBest cmd1 noop@(Noop _) = noop
     -- arbitrary
     pickBest cmd1 cmd2 = cmd1
+
+isViableCommand (None _) = False
+isViableCommand _ = True
 
 describeFailure :: String -> FailureDescription
 describeFailure = Char8.pack

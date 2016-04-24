@@ -17,6 +17,7 @@ import System.Posix.Files (createSymbolicLink)
 import Mex.CommandTree
 import Mex.Commands
 import Mex.MediaInfo
+import Mex.Transcode
 
 convertSubtitle :: ExternalSubtitle -> CommandTree
 convertSubtitle ExternalSubtitle { subFormat = MediaFormat "SRT", subFile = source } = noopCommand source
@@ -39,13 +40,13 @@ extractAndConvertViableInternalSub mediainfo tracks =
       filtered = extract `andCommand` removeHtmlTags subs
    in filtered `andCommand` linkFirstViableSub (map subFile subs)
 
-hardsubInternalSub :: MediaInfo -> [MediaTrack] -> CommandTree
-hardsubInternalSub mediainfo tracks =
+hardsubInternalSub :: Transcode -> [MediaTrack] -> Transcode
+hardsubInternalSub transcode tracks =
   -- picking the last is a broken heuristic
   let subtitles = filter (("Text" ==) . mediaType) tracks
    in if null subtitles
-        then noCommand (mediaFile mediainfo)
-        else ffmpegHardsub mediainfo (last subtitles)
+        then transcode
+        else hardsubTrack transcode (last subtitles)
 
 linkFirstViableSub :: [FilePath] -> CommandTree
 linkFirstViableSub subs = internalCommand description action

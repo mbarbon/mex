@@ -3,9 +3,7 @@ module Mex.Commands (
   ffmpegExtractSubs,
   ffmpegConvertSubs,
   ffmpegConvertAllSubs,
-  ffmpegHardsub,
   removeHtmlTags,
-  renameFile,
 ) where
 
 import Control.Monad (foldM_)
@@ -63,20 +61,8 @@ ffmpegConvertAllSubs :: [ExternalSubtitle] -> MediaFormat -> CommandTree
 ffmpegConvertAllSubs subs format =
   foldl andCommand (noopCommand "This should never be seen") $ map (`ffmpegConvertSubs` format) subs
 
-ffmpegHardsub :: MediaInfo -> MediaTrack -> CommandTree
-ffmpegHardsub mediainfo track =
-  let Just index = trackIndex mediainfo "Text" (trackId track)
-      path = (mediaFile mediainfo)
-      tempFile = (replaceExtension path (".tmp" ++ (takeExtension path)))
-      filterSpec = "[0:v][0:s:" ++ (show index) ++ "]overlay[v]"
-      command = shellCommand "ffmpeg" ["-y", "-i", path, "-filter_complex", filterSpec, "-map", "[v]", "-map", "0:a", "-c:a", "copy", tempFile]
-   in command `andCommand` (renameFile tempFile path)
-
 removeHtmlTags :: [ExternalSubtitle] -> CommandTree
 removeHtmlTags subs =
   case (filter (isTextSubtitle . subFormat) subs) of
       []   -> noopCommand (intercalate ", " (map subFile subs))
       subs -> shellCommand "sed" (["-i.orig", "s/<[^>]\\+>//g"] ++ (map subFile subs))
-
-renameFile :: String -> String -> CommandTree
-renameFile from to = shellCommand "mv" [from, to]
