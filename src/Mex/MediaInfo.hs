@@ -74,31 +74,35 @@ trackIndex mediainfo mediatype trkid =
   elemIndex trkid (map trackId (filter (\t -> mediatype == mediaType t) (tracks mediainfo)))
 
 mediaInfo :: FilePath -> IO MediaInfo
-mediaInfo file =
-  let isTrack :: Element -> Bool
-      isTrack e = (unpack . nameLocalName . elementName) e == "track" &&
-                  member (fromString "type") (elementAttributes e)
-      firstChild :: String -> Cursor -> Maybe Cursor
-      firstChild name e =
-        case ($.// (element (fromString name))) e of
-          x : xs -> Just x
-          _      -> Nothing
-      textContent :: Cursor -> String
-      textContent = unpack . concat . ($.// content)
-      getTrack :: Cursor -> Maybe MediaTrack
-      getTrack n =
-        let NodeElement e = node n
-         in do trackId <- firstChild "ID" n
-               format <- firstChild "Format" n
-               mediaType <- lookup (fromString "type") (elementAttributes e)
-               return MediaTrack { trackId   = textContent trackId,
-                                   trackFormat = MediaFormat (textContent format),
-                                   mediaType = unpack mediaType }
-   in do (exitCode, xmlOutput, _) <- readProcessWithExitCode "mediainfo" ["--Output=XML", file] ByteString.empty
-         let Right document = parseLBS def (fromStrict xmlOutput)
-         let maybeTracks = ($.// (checkElement isTrack)) (fromDocument document)
-             allTracks = catMaybes (map getTrack maybeTracks)
-          in return MediaInfo { mediaFile = file, tracks = allTracks, subtitles = [] }
+mediaInfo file = do
+  (exitCode, xmlOutput, _) <- readProcessWithExitCode "mediainfo" ["--Output=XML", file] ByteString.empty
+  let Right document = parseLBS def (fromStrict xmlOutput)
+  let maybeTracks = ($.// (checkElement isTrack)) (fromDocument document)
+      allTracks = catMaybes (map getTrack maybeTracks)
+   in return MediaInfo { mediaFile = file, tracks = allTracks, subtitles = [] }
+  where
+    isTrack :: Element -> Bool
+    isTrack e = (unpack . nameLocalName . elementName) e == "track" &&
+                member (fromString "type") (elementAttributes e)
+
+    firstChild :: String -> Cursor -> Maybe Cursor
+    firstChild name e =
+      case ($.// (element (fromString name))) e of
+        x : xs -> Just x
+        _      -> Nothing
+
+    textContent :: Cursor -> String
+    textContent = unpack . concat . ($.// content)
+
+    getTrack :: Cursor -> Maybe MediaTrack
+    getTrack n =
+      let NodeElement e = node n
+       in do trackId <- firstChild "ID" n
+             format <- firstChild "Format" n
+             mediaType <- lookup (fromString "type") (elementAttributes e)
+             return MediaTrack { trackId   = textContent trackId,
+                                 trackFormat = MediaFormat (textContent format),
+                                 mediaType = unpack mediaType }
 
 addExternalSubs :: MediaInfo -> IO MediaInfo
 addExternalSubs mi@MediaInfo { mediaFile = file } =
