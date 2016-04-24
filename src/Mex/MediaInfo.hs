@@ -35,7 +35,7 @@ data MediaFormat = MediaFormat String
 data ExternalSubtitle = ExternalSubtitle { subFile :: String, subFormat :: MediaFormat }
                       | NoSubtitles String
   deriving (Eq, Show)
-data MediaTrack = MediaTrack { trackId, mediaType :: String, trackFormat :: MediaFormat }
+data MediaTrack = MediaTrack { trackId, mediaType :: String, trackFormat :: MediaFormat, referenceFrames :: Maybe Int }
   deriving (Eq, Show)
 data MediaInfo = MediaInfo { mediaFile :: String, tracks :: [MediaTrack], subtitles :: [ExternalSubtitle] }
   deriving (Eq, Show)
@@ -94,6 +94,13 @@ mediaInfo file = do
     textContent :: Cursor -> String
     textContent = unpack . concat . ($.// content)
 
+    getRefFrames :: Cursor -> Maybe Int
+    getRefFrames n = do
+      node <- firstChild "Format_settings__ReFrames" n
+      case words (textContent node) of
+        (count:["frames"]) -> return ((read count) :: Int)
+        _                  -> Nothing
+
     getTrack :: Cursor -> Maybe MediaTrack
     getTrack n =
       let NodeElement e = node n
@@ -102,7 +109,8 @@ mediaInfo file = do
              mediaType <- lookup (fromString "type") (elementAttributes e)
              return MediaTrack { trackId   = textContent trackId,
                                  trackFormat = MediaFormat (textContent format),
-                                 mediaType = unpack mediaType }
+                                 mediaType = unpack mediaType,
+                                 referenceFrames = getRefFrames n }
 
 addExternalSubs :: MediaInfo -> IO MediaInfo
 addExternalSubs mi@MediaInfo { mediaFile = file } =
