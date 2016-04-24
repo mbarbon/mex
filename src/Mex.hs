@@ -127,7 +127,7 @@ maybeTranscodeVideo mediainfo transcode =
 
     -- XXX configuration
     tooManyRefFrames (MediaTrack { mediaType = "Video", referenceFrames = Just count }) =
-      count > 8
+      count > 12
     tooManyRefFrames _ = False
 
 maybeTranscodeAudio :: MediaInfo -> Transcode -> Transcode
