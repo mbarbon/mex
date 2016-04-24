@@ -123,12 +123,12 @@ maybeTranscodeVideo mediainfo transcode =
     then transcodeVideo transcode basicX264
     else transcode
   where
-    needsTranscode = any tooManyRefFrames (tracks mediainfo)
+    needsTranscode = any levelOrRefFramesTooHigh (tracks mediainfo)
 
     -- XXX configuration
-    tooManyRefFrames (MediaTrack { mediaType = "Video", referenceFrames = Just count }) =
-      count > 12
-    tooManyRefFrames _ = False
+    levelOrRefFramesTooHigh (MediaTrack { mediaType = "Video", referenceFrames = Just frames, profileLevel = Just ("High 10", level) }) =
+      level > 5 && frames > 8
+    levelOrRefFramesTooHigh _ = False
 
 maybeTranscodeAudio :: MediaInfo -> Transcode -> Transcode
 maybeTranscodeAudio mediainfo transcode =

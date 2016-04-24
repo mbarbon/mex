@@ -36,7 +36,7 @@ data MediaFormat = MediaFormat String
 data ExternalSubtitle = ExternalSubtitle { subFile :: String, subFormat :: MediaFormat }
                       | NoSubtitles String
   deriving (Eq, Show)
-data MediaTrack = MediaTrack { trackId, mediaType :: String, trackFormat :: MediaFormat, referenceFrames :: Maybe Int }
+data MediaTrack = MediaTrack { trackId, mediaType :: String, trackFormat :: MediaFormat,  referenceFrames :: Maybe Int, profileLevel :: Maybe (String, Float) }
   deriving (Eq, Show)
 data MediaInfo = MediaInfo { mediaFile :: String, tracks :: [MediaTrack], subtitles :: [ExternalSubtitle] }
   deriving (Eq, Show)
@@ -105,6 +105,25 @@ mediaInfo file = do
         (count:["frames"]) -> return ((read count) :: Int)
         _                  -> Nothing
 
+    splitOnAt :: String -> String -> (String, String)
+    splitOnAt acc ('@':ss) = (reverse acc, ss)
+    splitOnAt acc (c:ss) = splitOnAt (c:acc) ss
+
+    getProfileLevel :: Cursor -> Maybe (String, Float)
+    getProfileLevel n = do
+      node <- firstChild "Format_profile" n
+      case splitOnAt "" (textContent node) of
+        (profile, 'L':levelString) -> do
+          level <- maybeFloat levelString
+          return (profile, level)
+        _                    -> Nothing
+
+    maybeFloat :: String -> Maybe Float
+    maybeFloat s =
+      case (reads s) :: [(Float, String)] of
+        (f, ""):_ -> Just f
+        _         -> Nothing
+
     getTrack :: Cursor -> Maybe MediaTrack
     getTrack n =
       let NodeElement e = node n
@@ -114,7 +133,8 @@ mediaInfo file = do
              return MediaTrack { trackId   = textContent trackId,
                                  trackFormat = MediaFormat (textContent format),
                                  mediaType = unpack mediaType,
-                                 referenceFrames = getRefFrames n }
+                                 referenceFrames = getRefFrames n,
+                                 profileLevel = getProfileLevel n }
 
 addExternalSubs :: MediaInfo -> IO MediaInfo
 addExternalSubs mi@MediaInfo { mediaFile = file } =
