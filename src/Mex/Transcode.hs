@@ -16,12 +16,13 @@ import Mex.MediaInfo (MediaInfo, MediaTrack, trackIndex, mediaFile, trackId)
 data Codec =
     Copy
   | Recode [String]
+  deriving (Show)
 
 data Transcode = Transcode {
   mediaInfo :: MediaInfo,
   audioCodec, videoCodec, subtitlesCodec :: Codec,
   hardsubTrackIndex :: Maybe Int
-}
+} deriving (Show)
 
 noopTranscode :: MediaInfo -> Transcode
 noopTranscode mediainfo =

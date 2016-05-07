@@ -27,6 +27,7 @@ import Data.String (fromString)
 import Data.Text (pack, unpack, concat)
 import System.Directory (doesFileExist)
 import System.FilePath (replaceExtension, takeExtension)
+import System.Posix.Files (isSymbolicLink, getSymbolicLinkStatus)
 import System.Process.ByteString (readProcessWithExitCode)
 import Text.XML (parseLBS, elementName, elementAttributes, def, nameLocalName, Element, Name, Node(NodeElement))
 import Text.XML.Cursor (fromDocument, checkElement, element, node, content, descendant, Cursor, (&/), ($.//))
@@ -38,8 +39,12 @@ data ExternalSubtitle = ExternalSubtitle { subFile :: String, subFormat :: Media
   deriving (Eq, Show)
 data MediaTrack = MediaTrack { trackId, mediaType :: String, trackFormat :: MediaFormat,  referenceFrames :: Maybe Int, profileLevel :: Maybe (String, Float) }
   deriving (Eq, Show)
-data MediaInfo = MediaInfo { mediaFile :: String, tracks :: [MediaTrack], subtitles :: [ExternalSubtitle] }
-  deriving (Eq, Show)
+data MediaInfo = MediaInfo {
+  mediaFile :: String,
+  tracks :: [MediaTrack],
+  subtitles :: [ExternalSubtitle],
+  symbolicLink :: Bool
+} deriving (Eq, Show)
 
 mediaFiles = ["mkv", "avi", "mp4"]
 subtitleFiles  = ["srt", "ass", "ssa"]
@@ -80,10 +85,11 @@ trackIndex mediainfo mediatype trkid =
 mediaInfo :: FilePath -> IO MediaInfo
 mediaInfo file = do
   (exitCode, xmlOutput, _) <- readProcessWithExitCode "mediainfo" ["--Output=XML", file] ByteString.empty
+  status <- getSymbolicLinkStatus file
   let Right document = parseLBS def (fromStrict xmlOutput)
   let maybeTracks = ($.// (checkElement isTrack)) (fromDocument document)
       allTracks = catMaybes (map getTrack maybeTracks)
-   in return MediaInfo { mediaFile = file, tracks = allTracks, subtitles = [] }
+   in return MediaInfo { mediaFile = file, tracks = allTracks, subtitles = [], symbolicLink = isSymbolicLink status }
   where
     isTrack :: Element -> Bool
     isTrack e = (unpack . nameLocalName . elementName) e == "track" &&

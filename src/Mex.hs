@@ -13,6 +13,13 @@ import Mex.Subtitles
 import Mex.Transcode
 import Mex.Scan (traverseWith)
 
+data Options = Options {
+  forceVideo :: Bool
+} deriving (Show)
+defaultOptions = Options {
+  forceVideo = False
+}
+
 commands :: [(String, [String] -> IO ())]
 commands = [
     ("process", processDirectory),
@@ -32,14 +39,22 @@ main =
         Nothing     -> showHelp []
 
 processDirectory :: [String] -> IO ()
-processDirectory directories =
-  forM_ directories $ \path ->
-    traverseWith (processMediaFiles path) path
+processDirectory args =
+  let (options, directories) = processOptions args
+   in forM_ directories $ \path ->
+        traverseWith (processMediaFiles options path) path
 
 scanTree :: [String] -> IO ()
 scanTree (source : target : []) =
   do traverseWith (symlinkMediaAndSubtitleFiles source target) source
-     traverseWith (processMediaFiles target) target
+     traverseWith (ifNotEmpty processSingleDirectory) target
+  where
+    ifNotEmpty action [] = return ()
+    ifNotEmpty action fs = action fs
+
+    processSingleDirectory files =
+      do options <- readDirectoryOptions (target </> (takeDirectory (head files)))
+         processMediaFiles options target files
 scanTree _ = showHelp []
 
 showHelp :: [String] -> IO ()
@@ -64,10 +79,34 @@ symlinkMediaAndSubtitleFiles source target files =
         createSymbolicLink (source </> file) targetPath
       else return ()
 
-processMediaFiles :: FilePath -> [FilePath] -> IO ()
-processMediaFiles source files =
+processMediaFiles :: Options -> FilePath -> [FilePath] -> IO ()
+processMediaFiles options source files =
   do workItems <- workList $ map (source </>) (filter isMediaFile files)
-     mapM_ runVerbose (commandList workItems)
+     mapM_ runVerbose (commandList options workItems)
+
+processOptions :: [String] -> (Options, [String])
+processOptions args = consumeArgs defaultOptions args
+  where
+    consumeArgs options ("--force-video":args) =
+      consumeArgs (options { forceVideo = True }) args
+    consumeArgs options args = (options, args)
+
+readDirectoryOptions :: String -> IO Options
+readDirectoryOptions directory = do
+  let fullPath = directory </> "mex.options"
+  exists <- doesFileExist fullPath
+  contents <- if exists
+                then readFile fullPath
+                else return ""
+  let (options, rest) = processOptions (filter interestingLine (lines contents))
+  if rest == []
+    then return options
+    else fail ("Unknown options " ++ (show rest))
+  where
+    interestingLine "" = False
+    interestingLine (' ':_) = False
+    interestingLine ('#':_) = False
+    interestingLine _ = True
 
 -- XXX configuration
 isGoodInternalSubtitle :: MediaFormat -> Bool
@@ -91,14 +130,16 @@ workList files =
     makeWorkEntry file =
       mediaInfo file >>= addExternalSubs
 
-commandList :: [MediaInfo] -> [CommandTree]
-commandList = map makeCommand
+commandList :: Options -> [MediaInfo] -> [CommandTree]
+commandList options = map makeCommand
   where
     makeCommand :: MediaInfo -> CommandTree
     makeCommand mediainfo =
       let goodExternal = filter (isGoodExternalSubtitle . subFormat) (subtitles mediainfo)
           goodInternal = filter (isGoodInternalSubtitle . trackFormat) (tracks mediainfo)
-          transcode = maybeTranscodeAudio mediainfo (maybeTranscodeVideo mediainfo (noopTranscode mediainfo))
+          transcode = if (symbolicLink mediainfo)
+                        then maybeTranscodeAudio options mediainfo (maybeTranscodeVideo options mediainfo (noopTranscode mediainfo))
+                        else noopTranscode mediainfo
        in if (null goodExternal) && (null goodInternal)
             then extractAndConvertSubtitles mediainfo transcode
             else transcodeCommand transcode
@@ -117,9 +158,9 @@ extractAndConvertSubtitles mediainfo@MediaInfo {subtitles = subtitles } transcod
        (False, False) -> chosen
        _              -> extractAndTranscode
 
-maybeTranscodeVideo :: MediaInfo -> Transcode -> Transcode
-maybeTranscodeVideo mediainfo transcode =
-  if needsTranscode
+maybeTranscodeVideo :: Options -> MediaInfo -> Transcode -> Transcode
+maybeTranscodeVideo options mediainfo transcode =
+  if (forceVideo options) || needsTranscode
     then transcodeVideo transcode basicX264
     else transcode
   where
@@ -130,8 +171,8 @@ maybeTranscodeVideo mediainfo transcode =
       level > 5 && frames > 8
     levelOrRefFramesTooHigh _ = False
 
-maybeTranscodeAudio :: MediaInfo -> Transcode -> Transcode
-maybeTranscodeAudio mediainfo transcode =
+maybeTranscodeAudio :: Options -> MediaInfo -> Transcode -> Transcode
+maybeTranscodeAudio options mediainfo transcode =
   if needsTranscode
     then transcodeAudio transcode basicAAC
     else transcode
