@@ -33,18 +33,18 @@ import Text.XML (parseLBS, elementName, elementAttributes, def, nameLocalName, E
 import Text.XML.Cursor (fromDocument, checkElement, element, node, content, descendant, Cursor, (&/), ($.//))
 
 data MediaFormat = MediaFormat String
-  deriving (Eq, Show)
+  deriving (Eq, Read, Show)
 data ExternalSubtitle = ExternalSubtitle { subFile :: String, subFormat :: MediaFormat }
                       | NoSubtitles String
-  deriving (Eq, Show)
+  deriving (Eq, Read, Show)
 data MediaTrack = MediaTrack { trackId, mediaType :: String, trackFormat :: MediaFormat,  referenceFrames :: Maybe Int, profileLevel :: Maybe (String, Float) }
-  deriving (Eq, Show)
+  deriving (Eq, Read, Show)
 data MediaInfo = MediaInfo {
   mediaFile :: String,
   tracks :: [MediaTrack],
   subtitles :: [ExternalSubtitle],
   symbolicLink :: Bool
-} deriving (Eq, Show)
+} deriving (Eq, Read, Show)
 
 mediaFiles = ["mkv", "avi", "mp4"]
 subtitleFiles  = ["srt", "ass", "ssa"]
@@ -114,6 +114,7 @@ mediaInfo file = do
     splitOnAt :: String -> String -> (String, String)
     splitOnAt acc ('@':ss) = (reverse acc, ss)
     splitOnAt acc (c:ss) = splitOnAt (c:acc) ss
+    splitOnAt acc ""     = (reverse acc, "")
 
     getProfileLevel :: Cursor -> Maybe (String, Float)
     getProfileLevel n = do

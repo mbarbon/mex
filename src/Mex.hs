@@ -6,6 +6,7 @@ import System.Environment (getArgs)
 import System.FilePath (replaceDirectory, takeDirectory, (</>))
 import System.Posix.Files (createSymbolicLink)
 
+import Mex.CachedMediaInfo
 import Mex.Commands
 import Mex.CommandTree
 import Mex.MediaInfo
@@ -128,7 +129,7 @@ workList files =
   where
     makeWorkEntry :: FilePath -> IO MediaInfo
     makeWorkEntry file =
-      mediaInfo file >>= addExternalSubs
+      cachedMediaInfo file >>= addExternalSubs
 
 commandList :: Options -> [MediaInfo] -> [CommandTree]
 commandList options = map makeCommand
