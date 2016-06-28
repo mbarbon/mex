@@ -1,7 +1,7 @@
 module Mex (main) where
 
-import Control.Monad (liftM, forM_, mapM_)
-import System.Directory (doesFileExist, createDirectoryIfMissing)
+import Control.Monad (liftM, forM_, mapM_, filterM)
+import System.Directory (doesFileExist, doesDirectoryExist, createDirectoryIfMissing, removeFile, removeDirectoryRecursive)
 import System.Environment (getArgs)
 import System.FilePath (replaceDirectory, takeDirectory, (</>))
 import System.Posix.Files (createSymbolicLink)
@@ -12,7 +12,7 @@ import Mex.CommandTree
 import Mex.MediaInfo
 import Mex.Subtitles
 import Mex.Transcode
-import Mex.Scan (traverseWith)
+import Mex.Scan
 
 data Options = Options {
   forceVideo :: Bool
@@ -47,7 +47,8 @@ processDirectory args =
 
 scanTree :: [String] -> IO ()
 scanTree (source : target : []) =
-  do traverseWith (symlinkMediaAndSubtitleFiles source target) source
+  do listDirectoryWith (removeDanglingEntries source target) target
+     traverseWith (symlinkMediaAndSubtitleFiles source target) source
      traverseWith (ifNotEmpty processSingleDirectory) target
   where
     ifNotEmpty action [] = return ()
@@ -68,6 +69,25 @@ showHelp _ =
 \    process <directory> [<directory> ...]\n\
 \    scan    <source directory> <target directory>\n"
    in putStr  help
+
+removeDanglingEntries :: FilePath -> FilePath -> [FilePath] -> IO ()
+removeDanglingEntries source target files = do
+  filtered <- filterM missingSource files
+  forM_ filtered $ \path -> do
+    let fullPath = target </> path
+    isDirectory <- doesDirectoryExist fullPath
+    isFile <- doesFileExist fullPath
+    case (isFile, isDirectory) of
+      (_, True) -> removeDirectoryRecursive fullPath
+      (True, _) -> removeFile fullPath
+      _         -> return ()
+  where
+    missingSource :: FilePath -> IO Bool
+    missingSource path = do
+      let fullSourcePath = source </> path
+      fileExists <- doesFileExist fullSourcePath
+      directoryExists <- doesDirectoryExist fullSourcePath
+      return $ not (fileExists || directoryExists)
 
 symlinkMediaAndSubtitleFiles :: FilePath -> FilePath -> [FilePath] -> IO ()
 symlinkMediaAndSubtitleFiles source target files =
