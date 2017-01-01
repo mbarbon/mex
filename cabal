@@ -1,0 +1,5 @@
+cabal install xml-conduit
+cabal install text
+cabal install process-extras
+cabal install pureMD5
+cabal install HDBC-sqlite3
