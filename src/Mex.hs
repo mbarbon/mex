@@ -15,9 +15,11 @@ import Mex.Transcode
 import Mex.Scan
 
 data Options = Options {
+  subPreferMkvextract :: Bool,
   forceVideo :: Bool
 } deriving (Show)
 defaultOptions = Options {
+  subPreferMkvextract = False,
   forceVideo = False
 }
 
@@ -110,6 +112,8 @@ processOptions args = consumeArgs defaultOptions args
   where
     consumeArgs options ("--force-video":args) =
       consumeArgs (options { forceVideo = True }) args
+    consumeArgs options ("--sub-prefer-mkvextract":args) =
+      consumeArgs (options { subPreferMkvextract = True }) args
     consumeArgs options args = (options, args)
 
 readDirectoryOptions :: String -> IO Options
@@ -162,16 +166,16 @@ commandList options = map makeCommand
                         then maybeTranscodeAudio options mediainfo (maybeTranscodeVideo options mediainfo (noopTranscode mediainfo))
                         else noopTranscode mediainfo
        in if (null goodExternal) && (null goodInternal)
-            then extractAndConvertSubtitles mediainfo transcode
+            then extractAndConvertSubtitles options mediainfo transcode
             else transcodeCommand transcode
 
-extractAndConvertSubtitles mediainfo@MediaInfo {subtitles = subtitles } transcode =
+extractAndConvertSubtitles options mediainfo@MediaInfo {subtitles = subtitles } transcode =
   let convertExternalCmd = viableCommand (map convertSubtitle subtitles)
       convertInternalCmd =
         let textSubs = (filter (isTextSubtitle . trackFormat) (tracks mediainfo))
          in if null textSubs
               then noCommand (mediaFile mediainfo)
-              else extractAndConvertViableInternalSub mediainfo textSubs
+              else extractAndConvertViableInternalSub (subPreferMkvextract options) mediainfo textSubs
       hardsubInternalCmd = transcodeCommand (hardsubInternalSub transcode (tracks mediainfo))
       chosen = viableCommand [convertExternalCmd, convertInternalCmd, hardsubInternalCmd]
       extractAndTranscode = chosen `andCommand` (transcodeCommand transcode)

@@ -25,18 +25,20 @@ convertSubtitle es@ExternalSubtitle { subFile = file, subFormat = subFormat } =
   ffmpegConvertSubs es (MediaFormat "SRT")
 convertSubtitle (NoSubtitles source) = noopCommand source
 
-extractInternalSubs :: MediaInfo -> [MediaTrack] -> (CommandTree, [ExternalSubtitle])
-extractInternalSubs mediainfo tracks =
+extractInternalSubs :: Bool -> MediaInfo -> [MediaTrack] -> (CommandTree, [ExternalSubtitle])
+extractInternalSubs preferMkvExtract mediainfo tracks =
   let (withFfmpeg, ffmpegOut) = ffmpegExtractSubs mediainfo tracks
       (withMkvExtract, mkvextractInt) = mkvextractSubs mediainfo tracks
       withMkvConvert = ffmpegConvertAllSubs mkvextractInt (MediaFormat "SRT")
       mkvPipeline =  withMkvExtract `andCommand` withMkvConvert
-      tryEither = withFfmpeg `orCommand` mkvPipeline
+      tryEither = if preferMkvExtract
+                    then mkvPipeline `orCommand` withFfmpeg
+                    else withFfmpeg `orCommand` mkvPipeline
    in (tryEither, ffmpegOut)
 
-extractAndConvertViableInternalSub :: MediaInfo -> [MediaTrack] -> CommandTree
-extractAndConvertViableInternalSub mediainfo tracks =
-  let (extract, subs) = extractInternalSubs mediainfo tracks
+extractAndConvertViableInternalSub :: Bool -> MediaInfo -> [MediaTrack] -> CommandTree
+extractAndConvertViableInternalSub preferMkvExtract mediainfo tracks =
+  let (extract, subs) = extractInternalSubs preferMkvExtract mediainfo tracks
       filtered = extract `andCommand` removeHtmlTags subs
    in filtered `andCommand` linkFirstViableSub (map subFile subs)
 
