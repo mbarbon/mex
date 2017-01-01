@@ -185,12 +185,17 @@ maybeTranscodeVideo options mediainfo transcode =
     then transcodeVideo transcode basicX264
     else transcode
   where
-    needsTranscode = any levelOrRefFramesTooHigh (tracks mediainfo)
+    needsTranscode = (any levelOrRefFramesTooHigh (tracks mediainfo)) ||
+                     (any unsupportedVideoFormat (tracks mediainfo))
 
     -- XXX configuration
     levelOrRefFramesTooHigh (MediaTrack { mediaType = "Video", referenceFrames = Just frames, profileLevel = Just ("High 10", level) }) =
       level > 5 && frames > 8
     levelOrRefFramesTooHigh _ = False
+
+    -- XXX configuration
+    unsupportedVideoFormat (MediaTrack { mediaType = "Video", trackFormat = MediaFormat "HEVC" }) = True
+    unsupportedVideoFormat _ = False
 
 maybeTranscodeAudio :: Options -> MediaInfo -> Transcode -> Transcode
 maybeTranscodeAudio options mediainfo transcode =
