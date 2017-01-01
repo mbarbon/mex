@@ -55,7 +55,7 @@ transcodeCommand t = transcode `andCommand` (renameFile tempFile path)
     path = (mediaFile . mediaInfo) t
     tempFile = (replaceExtension path (".tmp" ++ (takeExtension path)))
 
-    prefix = ["-y", "-i", path, "-c", "copy"]
+    prefix = ["-y", "-i", path]
 
     mapArg stream = ["-map", "0:" ++ stream ++ "?"]
 
@@ -64,18 +64,19 @@ transcodeCommand t = transcode `andCommand` (renameFile tempFile path)
       ("[0:v][0:s:" ++ (show index) ++ "]overlay[v]"),
       "-map", "[v]"]
 
-    codecArg stream Copy = []
+    codecArg stream Copy = ["-c:" ++ stream, "copy"]
     codecArg stream (Recode args) = ["-c:" ++ stream] ++ args
 
-    maybeHardsub Nothing = mapArg "v"
-    maybeHardsub (Just index) = hardsubArg index
+    maybeHardsubRecode Nothing codec = (mapArg "v") ++ (codecArg "v" codec)
+    maybeHardsubRecode (Just index) Copy = hardsubArg index
+    maybeHardsubRecode (Just index) codec = (hardsubArg index) ++ (codecArg "v" codec)
 
     transcode =
       shellCommand "ffmpeg" (
         prefix ++
-        (maybeHardsub (hardsubTrackIndex t)) ++
+        (maybeHardsubRecode (hardsubTrackIndex t) (videoCodec t)) ++
         (concatMap mapArg ["a", "s", "d", "t"]) ++
-        (codecArg "v" (videoCodec t)) ++
+        (concatMap ((flip codecArg) Copy) ["s", "d", "t"]) ++
         (codecArg "a" (audioCodec t)) ++
         [tempFile]
       )
