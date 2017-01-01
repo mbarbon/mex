@@ -55,7 +55,7 @@ transcodeCommand t = transcode `andCommand` (renameFile tempFile path)
     path = (mediaFile . mediaInfo) t
     tempFile = (replaceExtension path (".tmp" ++ (takeExtension path)))
 
-    prefix = ["-y", "-i", path]
+    prefix = ["-y", "-analyzeduration", "10000000", "-i", path]
 
     mapArg stream = ["-map", "0:" ++ stream ++ "?"]
 
