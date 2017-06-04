@@ -194,7 +194,7 @@ maybeTranscodeVideo options mediainfo transcode =
 
     -- XXX configuration
     levelOrRefFramesTooHigh (MediaTrack { mediaType = "Video", referenceFrames = Just frames, profileLevel = Just ("High 10", level) }) =
-      level > 5 && frames > 8
+      level >= 4 || frames > 8
     levelOrRefFramesTooHigh _ = False
 
     -- XXX configuration
@@ -212,4 +212,4 @@ maybeTranscodeAudio options mediainfo transcode =
 -- XXX configuration
 basicX264 = ["libx264", "-preset", "slow", "-level", "4.1", "-crf", "23"]
 
-basicAAC = ["aac", "-b:a", "192k"]
+basicAAC = ["aac", "-b:a", "192k", "-ac", "2"]
