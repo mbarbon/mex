@@ -39,8 +39,15 @@ data MediaFormat = MediaFormat String
 data ExternalSubtitle = ExternalSubtitle { subFile :: String, subFormat :: MediaFormat }
                       | NoSubtitles String
   deriving (Eq, Read, Show)
-data MediaTrack = MediaTrack { trackId, mediaType :: String, trackFormat :: MediaFormat,  referenceFrames :: Maybe Int, profileLevel :: Maybe (String, Float) }
-  deriving (Eq, Read, Show)
+
+data MediaTrack = MediaTrack {
+  trackId, mediaType :: String,
+  trackFormat :: MediaFormat,
+  referenceFrames :: Maybe Int,
+  language :: Maybe String,
+  profileLevel :: Maybe (String, Float)
+} deriving (Eq, Read, Show)
+
 data MediaInfo = MediaInfo {
   mediaFile :: String,
   tracks :: [MediaTrack],
@@ -118,6 +125,11 @@ mediaInfo file = do
         (count:["frames"]) -> return ((read count) :: Int)
         _                  -> Nothing
 
+    getLanguage :: Cursor -> Maybe String
+    getLanguage n = do
+      node <- firstChild "Language" n
+      return (textContent node)
+
     splitOnAt :: String -> String -> (String, String)
     splitOnAt acc ('@':ss) = (reverse acc, ss)
     splitOnAt acc (c:ss) = splitOnAt (c:acc) ss
@@ -148,6 +160,7 @@ mediaInfo file = do
                                  trackFormat = MediaFormat (textContent format),
                                  mediaType = unpack mediaType,
                                  referenceFrames = getRefFrames n,
+                                 language = getLanguage n,
                                  profileLevel = getProfileLevel n }
 
 addExternalSubs :: MediaInfo -> IO MediaInfo

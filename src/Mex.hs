@@ -217,9 +217,18 @@ maybeTranscodeAudio options mediainfo transcode =
 
 filteredSubtitles :: MediaInfo -> [MediaTrack]
 filteredSubtitles mediaInfo =
-  filter isSubtitleTrack (tracks mediaInfo)
+  filter hasRightLanguage (filter isSubtitleTrack (tracks mediaInfo))
+
+  where
+    hasRightLanguage :: MediaTrack -> Bool
+    hasRightLanguage track =
+      case (language track) of
+        Nothing   -> True
+        Just lang -> elem lang preferredSubtitles
 
 -- XXX configuration
 basicX264 = ["libx264", "-preset", "slow", "-level", "4.1", "-crf", "23"]
 
 basicAAC = ["aac", "-b:a", "192k", "-ac", "2"]
+
+preferredSubtitles = ["English", "Italian"]
