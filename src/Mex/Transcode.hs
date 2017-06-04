@@ -2,7 +2,7 @@ module Mex.Transcode (
   Transcode,
   noopTranscode,
   isNoopTranscode,
-  hardsubTrack,
+  hardsubMediaTrack,
   transcodeAudio,
   transcodeVideo,
   transcodeCommand,
@@ -11,7 +11,7 @@ module Mex.Transcode (
 import System.FilePath (replaceExtension, takeExtension)
 
 import Mex.CommandTree
-import Mex.MediaInfo (MediaInfo, MediaTrack, trackIndex, mediaFile, trackId)
+import Mex.MediaInfo (MediaInfo, MediaTrack, trackIndex, mediaFile, trackId, isTextSubtitle, trackFormat)
 
 data Codec =
     Copy
@@ -21,6 +21,7 @@ data Codec =
 data Transcode = Transcode {
   mediaInfo :: MediaInfo,
   audioCodec, videoCodec, subtitlesCodec :: Codec,
+  hardsubTrack :: Maybe MediaTrack,
   hardsubTrackIndex :: Maybe Int
 } deriving (Show)
 
@@ -31,13 +32,14 @@ noopTranscode mediainfo =
     audioCodec = Copy,
     videoCodec = Copy,
     subtitlesCodec = Copy,
+    hardsubTrack = Nothing,
     hardsubTrackIndex = Nothing
   }
 
-hardsubTrack :: Transcode -> MediaTrack -> Transcode
-hardsubTrack transcode track =
+hardsubMediaTrack :: Transcode -> MediaTrack -> Transcode
+hardsubMediaTrack transcode track =
   let Just index = trackIndex (mediaInfo transcode) "Text" (trackId track)
-   in transcode { hardsubTrackIndex = Just index }
+   in transcode { hardsubTrack = Just track, hardsubTrackIndex = Just index }
 
 transcodeAudio :: Transcode -> [String] -> Transcode
 transcodeAudio t args = t { audioCodec = Recode args }
@@ -59,25 +61,40 @@ transcodeCommand t = transcode `andCommand` (renameFile tempFile path)
 
     mapArg stream = ["-map", "0:" ++ stream ++ "?"]
 
-    hardsubArg index = [
+    hardsubImgArg index = [
       "-filter_complex",
       ("[0:v][0:s:" ++ (show index) ++ "]overlay[v]"),
       "-map", "[v]"]
 
-    codecArg stream Copy = ["-c:" ++ stream, "copy"]
-    codecArg stream (Recode args) = ["-c:" ++ stream] ++ args
+    hardsubTextArg index = (mapArg "v") ++ [
+      "-vf", "subtitles=" ++ (quoteSource path) ++ ":si=" ++ (show index)]
+      where
+        quoteSource ('[':cs) = '\\':'[':(quoteSource cs)
+        quoteSource (']':cs) = '\\':']':(quoteSource cs)
+        quoteSource (c:cs)   = c:(quoteSource cs)
+        quoteSource []       = []
 
-    maybeHardsubRecode Nothing codec = (mapArg "v") ++ (codecArg "v" codec)
-    maybeHardsubRecode (Just index) Copy = hardsubArg index
-    maybeHardsubRecode (Just index) codec = (hardsubArg index) ++ (codecArg "v" codec)
+    codecArg Copy stream = ["-c:" ++ stream, "copy"]
+    codecArg (Recode args) stream = ["-c:" ++ stream] ++ args
+
+    mapCopy stream = (mapArg stream) ++ (codecArg Copy stream)
+
+    maybeHardsubRecode Nothing Nothing codec =
+      (mapArg "v") ++ (codecArg codec "v") ++ (mapCopy "s")
+    maybeHardsubRecode (Just track) (Just index) codec =
+      let hardsub = if isTextSubtitle (trackFormat track)
+                      then hardsubTextArg index
+                      else hardsubImgArg index
+       in case codec of
+         Copy -> hardsub
+         _    -> hardsub ++ (codecArg codec "v")
 
     transcode =
       shellCommand "ffmpeg" (
         prefix ++
-        (maybeHardsubRecode (hardsubTrackIndex t) (videoCodec t)) ++
-        (concatMap mapArg ["a", "s", "d", "t"]) ++
-        (concatMap ((flip codecArg) Copy) ["s", "d", "t"]) ++
-        (codecArg "a" (audioCodec t)) ++
+        (maybeHardsubRecode (hardsubTrack t) (hardsubTrackIndex t) (videoCodec t)) ++
+        (concatMap mapCopy ["d", "t"]) ++
+        (mapArg "a") ++ (codecArg (audioCodec t) "a") ++
         [tempFile]
       )
 

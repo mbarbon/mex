@@ -1,5 +1,6 @@
 module Mex.Subtitles (
   convertSubtitle,
+  hasInternalSubs,
   extractInternalSubs,
   hardsubInternalSub,
   extractAndConvertViableInternalSub
@@ -25,6 +26,10 @@ convertSubtitle es@ExternalSubtitle { subFile = file, subFormat = subFormat } =
   ffmpegConvertSubs es (MediaFormat "SRT")
 convertSubtitle (NoSubtitles source) = noopCommand source
 
+hasInternalSubs :: [MediaTrack] -> Bool
+hasInternalSubs tracks =
+  any isSubtitleTrack tracks
+
 extractInternalSubs :: Bool -> MediaInfo -> [MediaTrack] -> (CommandTree, [ExternalSubtitle])
 extractInternalSubs preferMkvExtract mediainfo tracks =
   let (withFfmpeg, ffmpegOut) = ffmpegExtractSubs mediainfo tracks
@@ -43,12 +48,11 @@ extractAndConvertViableInternalSub preferMkvExtract mediainfo tracks =
    in filtered `andCommand` linkFirstViableSub (map subFile subs)
 
 hardsubInternalSub :: Transcode -> [MediaTrack] -> Transcode
-hardsubInternalSub transcode tracks =
+hardsubInternalSub transcode subtitles =
   -- picking the last is a broken heuristic
-  let subtitles = filter (("Text" ==) . mediaType) tracks
-   in if null subtitles
-        then transcode
-        else hardsubTrack transcode (last subtitles)
+  if null subtitles
+    then transcode
+    else hardsubMediaTrack transcode (last subtitles)
 
 linkFirstViableSub :: [FilePath] -> CommandTree
 linkFirstViableSub subs = internalCommand description action

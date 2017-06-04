@@ -16,10 +16,12 @@ import Mex.Scan
 
 data Options = Options {
   subPreferMkvextract :: Bool,
+  forceHardsub :: Bool,
   forceVideo :: Bool
 } deriving (Show)
 defaultOptions = Options {
   subPreferMkvextract = False,
+  forceHardsub = False,
   forceVideo = False
 }
 
@@ -112,6 +114,8 @@ processOptions args = consumeArgs defaultOptions args
   where
     consumeArgs options ("--force-video":args) =
       consumeArgs (options { forceVideo = True }) args
+    consumeArgs options ("--force-hardsub":args) =
+      consumeArgs (options { forceHardsub = True }) args
     consumeArgs options ("--sub-prefer-mkvextract":args) =
       consumeArgs (options { subPreferMkvextract = True }) args
     consumeArgs options args = (options, args)
@@ -169,19 +173,21 @@ commandList options = map makeCommand
             then extractAndConvertSubtitles options mediainfo transcode
             else transcodeCommand transcode
 
-extractAndConvertSubtitles options mediainfo@MediaInfo {subtitles = subtitles } transcode =
+extractAndConvertSubtitles options mediainfo@MediaInfo { subtitles = subtitles } transcode =
   let convertExternalCmd = viableCommand (map convertSubtitle subtitles)
+      internalSubtitles = filteredSubtitles mediainfo
       convertInternalCmd =
-        let textSubs = (filter (isTextSubtitle . trackFormat) (tracks mediainfo))
+        let textSubs = filter (isTextSubtitle . trackFormat) internalSubtitles
          in if null textSubs
               then noCommand (mediaFile mediainfo)
               else extractAndConvertViableInternalSub (subPreferMkvextract options) mediainfo textSubs
-      hardsubInternalCmd = transcodeCommand (hardsubInternalSub transcode (tracks mediainfo))
-      chosen = viableCommand [convertExternalCmd, convertInternalCmd, hardsubInternalCmd]
-      extractAndTranscode = chosen `andCommand` (transcodeCommand transcode)
-   in case (isViableCommand convertExternalCmd, isViableCommand convertInternalCmd) of
-       (False, False) -> chosen
-       _              -> extractAndTranscode
+      hardsubInternalCmd = transcodeCommand (hardsubInternalSub transcode internalSubtitles)
+      forcedHardsub = (hasInternalSubs internalSubtitles) && (forceHardsub options)
+      hasSubConversion = (isViableCommand convertExternalCmd) || (isViableCommand convertInternalCmd)
+      chosen = viableCommand [convertExternalCmd, convertInternalCmd]
+   in if hasSubConversion && not forcedHardsub
+        then chosen `andCommand` (transcodeCommand transcode)
+        else hardsubInternalCmd
 
 maybeTranscodeVideo :: Options -> MediaInfo -> Transcode -> Transcode
 maybeTranscodeVideo options mediainfo transcode =
@@ -208,6 +214,10 @@ maybeTranscodeAudio options mediainfo transcode =
     else transcode
   where
     needsTranscode = not (any (isGoodAudioFormat . trackFormat) (audioTracks mediainfo))
+
+filteredSubtitles :: MediaInfo -> [MediaTrack]
+filteredSubtitles mediaInfo =
+  filter isSubtitleTrack (tracks mediaInfo)
 
 -- XXX configuration
 basicX264 = ["libx264", "-preset", "slow", "-level", "4.1", "-crf", "23"]

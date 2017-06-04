@@ -7,6 +7,7 @@ module Mex.MediaInfo (
   addExternalSubs,
   extForFormat,
   formatForExt,
+  isSubtitleTrack,
   isTextSubtitle,
   isMediaFile,
   isMediaOrSubtitleFile,
@@ -58,6 +59,9 @@ formatForExt :: String -> MediaFormat
 formatForExt "srt" = MediaFormat "SRT"
 formatForExt "ass" = MediaFormat "ASS"
 formatForExt "ssa" = MediaFormat "SSA"
+
+isSubtitleTrack :: MediaTrack -> Bool
+isSubtitleTrack = ("Text" ==) . mediaType
 
 isTextSubtitle :: MediaFormat -> Bool
 isTextSubtitle (MediaFormat format) =
