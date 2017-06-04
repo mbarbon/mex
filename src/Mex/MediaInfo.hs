@@ -27,6 +27,7 @@ import Data.Maybe (catMaybes)
 import Data.String (fromString)
 import Data.Text (pack, unpack, concat)
 import System.Directory (doesFileExist)
+import System.Exit (ExitCode(ExitSuccess))
 import System.FilePath (replaceExtension, takeExtension)
 import System.Posix.Files (isSymbolicLink, getSymbolicLinkStatus)
 import System.Process.ByteString (readProcessWithExitCode)
@@ -90,10 +91,12 @@ mediaInfo :: FilePath -> IO MediaInfo
 mediaInfo file = do
   (exitCode, xmlOutput, _) <- readProcessWithExitCode "mediainfo" ["--Output=XML", file] ByteString.empty
   status <- getSymbolicLinkStatus file
-  let Right document = parseLBS def (fromStrict xmlOutput)
-  let maybeTracks = ($.// (checkElement isTrack)) (fromDocument document)
-      allTracks = catMaybes (map getTrack maybeTracks)
-   in return MediaInfo { mediaFile = file, tracks = allTracks, subtitles = [], symbolicLink = isSymbolicLink status }
+  case (exitCode, parseLBS def (fromStrict xmlOutput)) of
+    (ExitSuccess, Right document) ->
+      let maybeTracks = ($.// (checkElement isTrack)) (fromDocument document)
+          allTracks = catMaybes (map getTrack maybeTracks)
+       in return MediaInfo { mediaFile = file, tracks = allTracks, subtitles = [], symbolicLink = isSymbolicLink status }
+    (_, _) -> return MediaInfo { mediaFile = file, tracks = [], subtitles = [], symbolicLink = isSymbolicLink status }
   where
     isTrack :: Element -> Bool
     isTrack e = (unpack . nameLocalName . elementName) e == "track" &&
