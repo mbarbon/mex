@@ -39,7 +39,7 @@ extractInternalSubs preferMkvExtract mediainfo tracks =
 extractAndConvertViableInternalSub :: Bool -> MediaInfo -> [MediaTrack] -> CommandTree
 extractAndConvertViableInternalSub preferMkvExtract mediainfo tracks =
   let (extract, subs) = extractInternalSubs preferMkvExtract mediainfo tracks
-      filtered = extract `andCommand` removeHtmlTags subs
+      filtered = extract `andCommand` removeHtmlTagsAndComments subs
    in filtered `andCommand` linkFirstViableSub (map subFile subs)
 
 hardsubInternalSub :: Transcode -> [MediaTrack] -> Transcode

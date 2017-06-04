@@ -3,7 +3,7 @@ module Mex.Commands (
   ffmpegExtractSubs,
   ffmpegConvertSubs,
   ffmpegConvertAllSubs,
-  removeHtmlTags,
+  removeHtmlTagsAndComments,
 ) where
 
 import Control.Monad (foldM_)
@@ -61,8 +61,8 @@ ffmpegConvertAllSubs :: [ExternalSubtitle] -> MediaFormat -> CommandTree
 ffmpegConvertAllSubs subs format =
   foldl andCommand (noopCommand "This should never be seen") $ map (`ffmpegConvertSubs` format) subs
 
-removeHtmlTags :: [ExternalSubtitle] -> CommandTree
-removeHtmlTags subs =
+removeHtmlTagsAndComments :: [ExternalSubtitle] -> CommandTree
+removeHtmlTagsAndComments subs =
   case (filter (isTextSubtitle . subFormat) subs) of
       []   -> noopCommand (intercalate ", " (map subFile subs))
-      subs -> shellCommand "sed" (["-i.orig", "s/<[^>]\\+>//g"] ++ (map subFile subs))
+      subs -> shellCommand "sed" (["-i.orig", "-e", "s/<[^>]\\+>//g", "-e", "s/{[^}]*}//g"] ++ (map subFile subs))
