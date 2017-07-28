@@ -13,4 +13,14 @@ if [ ! -d "$REALDIR" -o ! -f "$MAIN" ]; then
   exit 1
 fi
 
-exec runhaskell -i"$REALDIR" "$REALDIR"/Main.hs "$@"
+if [ -d "$REALDIR/../.cabal-sandbox" ]; then
+  RUNHASKELL="cabal --sandbox-config-file=$REALDIR/../cabal.sandbox.config exec -- runhaskell"
+else
+  RUNHASKELL="runhaskell"
+fi
+
+if [ -d "$REALDIR/../.cabal-sandbox" ]; then
+  exec cabal --sandbox-config-file="$REALDIR/../cabal.sandbox.config" exec -- runhaskell -i"$REALDIR" "$REALDIR"/Main.hs "$@"
+else
+  exec runhaskell -i"$REALDIR" "$REALDIR"/Main.hs "$@"
+fi
